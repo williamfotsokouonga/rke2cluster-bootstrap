@@ -61,18 +61,11 @@ spec:
 {{- end }}
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions: {{ include "linux-node-selector-terms" . | nindent 16 }}
-              {{- if .Values.extraNodeSelectorTerms }}
-              {{- toYaml .Values.extraNodeSelectorTerms | nindent 16 }}
-              {{- end }}
+            nodeSelectorTerms: {{ include "linux-node-selector-terms" . | nindent 14 }}
       tolerations: {{ include "linux-node-tolerations" . | nindent 8 }}
-      {{- if .Values.extraTolerations }}
-      {{- toYaml .Values.extraTolerations | nindent 8 }}
-      {{- end }}
       containers:
-      - image: "{{ template "rancher.image" . }}:{{ template "rancher.imageTag" . }}"
-        imagePullPolicy: {{ include "rancher.imagePullPolicy" . }}
+      - image: {{ .Values.rancherImage }}:{{ default .Chart.AppVersion .Values.rancherImageTag }}
+        imagePullPolicy: {{ default "IfNotPresent" .Values.rancherImagePullPolicy }}
         name: {{ template "rancher.name" . }}
         ports:
         - containerPort: 80
@@ -82,8 +75,6 @@ spec:
           hostPort: {{ int .Values.hostPort }}
           protocol: TCP
 {{- end}}
-        - containerPort: 6666
-          protocol: TCP
         args:
 {{- if .Values.debug }}
         - "--debug"
@@ -112,9 +103,7 @@ spec:
         - name: CATTLE_NO_DEFAULT_ADMIN
           value: "{{ .Values.noDefaultAdmin }}"
 {{- end}}
-{{- if .Values.auditLog.enabled }}
-        - name: AUDIT_LOG_ENABLED
-          value: "true"
+{{- if gt (int .Values.auditLog.level) 0 }}
         - name: AUDIT_LEVEL
           value: {{ .Values.auditLog.level | quote }}
         - name: AUDIT_LOG_MAXAGE
@@ -140,6 +129,10 @@ spec:
         - name: CATTLE_SYSTEM_CATALOG
           value: bundled
 {{- end }}
+{{- if .Values.restrictedAdmin }}
+        - name: CATTLE_RESTRICTED_DEFAULT_ADMIN
+          value: "true"
+{{- end}}
 {{- if .Values.bootstrapPassword }}
         - name: CATTLE_BOOTSTRAP_PASSWORD
           valueFrom:
@@ -150,18 +143,6 @@ spec:
 {{- if .Values.agentTLSMode }}
         - name: CATTLE_AGENT_TLS_MODE
           value: "{{ .Values.agentTLSMode }}"
-{{- end }}
-        - name: IMPERATIVE_API_DIRECT
-          value: "true"
-        - name: IMPERATIVE_API_APP_SELECTOR
-          value: {{ template "rancher.fullname" . }}
-{{- if .Values.aggregationRegistrationTimeout }}
-        - name: AGGREGATION_REGISTRATION_TIMEOUT
-          value: {{ .Values.aggregationRegistrationTimeout }}
-{{- end }}
-{{- if .Values.cacheSyncTimeout }}
-        - name: CACHE_SYNC_TIMEOUT
-          value: {{ .Values.cacheSyncTimeout }}
 {{- end }}
 {{- if .Values.extraEnv }}
 {{ toYaml .Values.extraEnv | indent 8}}
@@ -193,9 +174,8 @@ spec:
           timeoutSeconds: {{.Values.readinessProbe.timeoutSeconds }}
           periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
           failureThreshold: {{.Values.readinessProbe.failureThreshold }}
-        {{- if .Values.resources }}
-        resources: {{- toYaml .Values.resources | nindent 10 }}
-        {{- end }}
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
         volumeMounts:
 {{- if .Values.additionalTrustedCAs }}
         - mountPath: /etc/pki/trust/anchors/ca-additional.pem
@@ -223,24 +203,29 @@ spec:
           name: custom-logos
           subPath: {{ .Values.customLogos.volumeSubpaths.vueUi | default "vue" | quote }}
 {{- end }}
-{{- if .Values.auditLog.enabled }}
+{{- if gt (int .Values.auditLog.level) 0 }}
         - mountPath: /var/log/auditlog
           name: audit-log
 {{- end }}
 {{- if eq .Values.auditLog.destination "sidecar" }}
-  {{- if .Values.auditLog.enabled }}
+  {{- if gt (int .Values.auditLog.level) 0 }}
       # Make audit logs available for Rancher log collector tools.
-      - image: "{{ printf "%s%s" (include "defaultOrOverrideRegistry" (list . (default "" .Values.auditLog.image.registry))) (include "auditLog.image" .) }}"
-        imagePullPolicy: {{ default .Values.auditLog.image.pullPolicy .Values.busyboxImagePullPolicy }}
+      {{- if .Values.busyboxImage }}
+      - image: {{ .Values.busyboxImage}}
+      {{- else }}
+      - image: {{ .Values.auditLog.image.repository }}:{{.Values.auditLog.image.tag}}
+      {{- end }}
+      {{- if .Values.busyboxImagePullPolicy }}
+        imagePullPolicy: {{ .Values.busyboxImagePullPolicy }}
+      {{- else }}
+        imagePullPolicy: {{ .Values.auditLog.image.pullPolicy }}
+      {{- end }}
         name: {{ template "rancher.name" . }}-audit-log
         command: ["tail"]
         args: ["-F", "/var/log/auditlog/rancher-api-audit.log"]
         volumeMounts:
         - mountPath: /var/log/auditlog
           name: audit-log
-        {{- if .Values.auditLog.resources }}
-        resources: {{- toYaml .Values.auditLog.resources | nindent 10 }}
-        {{- end }}
   {{- end }}
 {{- end }}
       volumes:
@@ -256,7 +241,7 @@ spec:
           defaultMode: 0400
           secretName: tls-ca
 {{- end }}
-{{- if .Values.auditLog.enabled }}
+{{- if gt (int .Values.auditLog.level) 0 }}
   {{- if eq .Values.auditLog.destination "hostPath" }}
       - name: audit-log
         hostPath:

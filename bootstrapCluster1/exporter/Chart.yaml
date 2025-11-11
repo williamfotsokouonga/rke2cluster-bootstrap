@@ -1,0 +1,18 @@
+annotations:
+  charts.openshift.io/name: exporter
+apiVersion: v2
+appVersion: 1.0.0
+dependencies:
+- condition: settings.deployKubeStateMetrics
+  name: kube-state-metrics
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 5.27.0
+- condition: settings.deployWindowsExporter
+  name: prometheus-windows-exporter
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 0.9.0
+description: PerfectScale data exporter
+kubeVersion: '>=1.21.0-0'
+name: exporter
+type: application
+version: v1.0.78

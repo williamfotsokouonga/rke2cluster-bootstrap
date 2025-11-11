@@ -1,0 +1,235 @@
+{{- $fullName := include "helm.fullname" . -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helm.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    {{- if .Values.additionalLabels }}
+    {{- toYaml .Values.additionalLabels | nindent 4 }}
+    {{- end }}
+  {{- with .Values.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit | default 10 }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "helm.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "helm.selectorLabels" . | nindent 8 }}
+        {{- if .Values.podLabels }}
+        {{- toYaml .Values.podLabels | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- if ne .Values.priorityClass.enabled false}}
+      priorityClassName: {{ .Values.priorityClass.name | default "perfectscale-exporter" }}
+      {{- end }}
+      serviceAccountName: {{ include "helm.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.settings.deployKubeStateMetrics }}
+      initContainers:
+        - name: depends-on
+          image: "{{ .Values.initContainer.image.repository }}:{{ .Values.initContainer.image.tag }}"
+          command: [ 'sh' ]
+          args: [ '-c', 'curl --retry-all-errors --retry 30 --retry-delay 5 -s {{ include "helm.exporter.ksmAddress" . }}; sleep {{ .Values.settings.initSleep | default "1s" }}' ]
+          {{- if .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args: ["./app"]
+          env:
+{{- if eq .Values.settings.env "dev" }}
+          - name: GOMEMLIMIT
+            value: "{{ .Values.resources.requests.memory }}B"
+{{- end }}
+          - name: SERVICE_ID
+            value: "{{ .Values.settings.serviceId }}"
+          - name: ENV
+            value: "{{ .Values.settings.env }}"
+          - name: LOG_LEVEL
+            value: "{{ .Values.settings.logLevel }}"
+          - name: HTTP_PORT
+            value: "{{ .Values.settings.httpPort }}"
+          - name: SCRAPE_FREQUENCY_TIME
+            value: "{{ .Values.settings.scrapingInterval }}"
+          - name: PUSH_TELEMETRY_FREQUENCY
+            value: "{{ .Values.settings.pushTelemetryFrequency }}"
+          - name: KUBE_API_TIMEOUT
+            value: "{{ .Values.settings.kubeAPITimeoutSec }}"
+          - name: DATA_RETENTION_TIME
+            value: "{{ .Values.settings.dataRetentionTime | default "15m" }}"
+          - name: KSM_ADDRESS
+            value: "{{ include "helm.exporter.ksmAddress" . }}"
+          - name: KSM_TIMEOUT
+            value: "{{ include "helm.exporter.ksmTimeout" . }}"
+          - name: CADVISOR_NUM_WORKERS
+            value: "{{ .Values.settings.cAdvisorNumWorkers }}"
+          - name: PS_URL
+            value: "{{ .Values.settings.psUrl }}"
+          - name: UPLOAD_POLICY_URL
+            value: "{{ .Values.settings.uploadPolicyUrl }}"
+          - name: TELEMETRY_URL
+            value: "{{ .Values.settings.telemetryUrl }}"
+          - name: AGGREGATOR_URL
+            value: "{{ .Values.settings.aggregatorUrl }}"
+          - name: RAW_TIME_WINDOW_SIZE_MINUTES
+            value: "{{ .Values.settings.rawTimeWindowSizeMinutes | default "10m" }}"
+          - name: UPLOAD_POLICY_REFRESH_PCT
+            value: "{{ .Values.settings.policyRefreshPct | default "0.5" }}"
+          - name: CLUSTER_UID
+            value: "{{ include "helm.exporter.clusterUID" . }}"
+          - name: CLUSTER_RESILIENCE_LEVEL
+            value: "{{ .Values.settings.clusterResilienceLevel }}"
+          - name: CLUSTER_OPTIMIZATION_POLICY
+            value: "{{ .Values.settings.clusterOptimizationPolicy }}"
+          - name: OPTIMIZATION_POLICY_TIME_WINDOW
+            value: "{{ .Values.settings.optimizationPolicyTimeWindow }}"
+          - name: DEMO_ENV_ADDRESS
+            value: "{{ .Values.settings.demoEnvAddress }}"
+          - name: ENABLE_PPROF
+            value: "{{ .Values.settings.enablePProf | default "false" }}"
+          - name: ENABLE_OOM_DEBUG
+            value: "{{ .Values.settings.enableOomDebug | default "false" }}"
+          - name: POD_REGEX
+            value: "{{ .Values.settings.podRegex | default "" }}"
+          - name: CONTAINER_REGEX
+            value: "{{ .Values.settings.containerRegex | default "" }}"
+          - name: "KUBERNETES_CLIENT_BURST"
+            value: "{{ .Values.settings.k8sClientBurst }}"
+          - name: "KUBERNETES_CLIENT_QPS"
+            value: "{{ .Values.settings.k8sClientQPS }}"
+          - name: CLIENT_ID
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.secret.name | default $fullName }}
+                key: "clientId"
+                optional: false
+          - name: CLIENT_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.secret.name | default $fullName }}
+                key: "clientSecret"
+                optional: false
+          - name: "NUM_SCRAPERS"
+            value: "{{ .Values.settings.scraper.numberOfScrapers }}"
+          - name: "KSM_METRICS_PORT"
+            value: "{{ .Values.settings.scraper.ksmMetricsPort }}"
+          - name: "LABEL_SELECTOR"
+            value: "{{ .Values.settings.scraper.labelSelector }}"
+          - name: "FIELD_SELECTOR"
+            value: "{{ .Values.settings.scraper.fieldSelector }}"
+          - name: "SCRAPE_EXTERNAL_KSM"
+            value: "{{ .Values.settings.scraper.scrapeExternalKSM }}"
+          - name: "SCRAPE_NAMESPACE"
+            value: "{{ .Values.settings.scraper.scrapeNamespace }}"
+          - name: "COLLECTOR_NUM_WORKERS"
+            value: "{{ .Values.settings.collectorNumWorkers }}"
+          - name: "KSM_IMAGE_NAME"
+            value: "{{ .Values.settings.scraper.ksmImageName }}"
+          - name: "CLUSTER_NAME"
+            value: "{{ .Values.settings.clusterName }}"
+          - name: REMOTE_LOG_BATCH_SIZE
+            value: "{{ include "helm.exporter.remoteLogBatchSize" . }}"
+          - name: REMOTE_LOG_BATCH_INTERVAL
+            value: "{{ include "helm.exporter.remoteLogBatchInterval" . }}"
+          {{- if .Values.settings.httpProxyEnabled | default false }}
+          - name: HTTP_PROXY
+            value: "{{ .Values.settings.httpProxy }}"
+          - name: HTTPS_PROXY
+            value: "{{ .Values.settings.httpsProxy }}"
+          - name: NO_PROXY
+            value: "{{ .Values.settings.noProxy }}{{ .Release.Name }}-kube-state-metrics"
+          {{- end }}
+          {{- if .Values.settings.windowsExporterEnabled | default false }}
+          - name: WINDOWS_EXPORTER_NAMESPACE
+            value: "{{ .Values.settings.windowsExporterNamespace | default .Release.Namespace }}"
+          - name: WINDOWS_EXPORTER_LABEL_SELECTOR
+            value: "{{ .Values.settings.windowsExporterLabelSelector | default "app.kubernetes.io/name=prometheus-windows-exporter" }}"
+          - name: WINDOWS_EXPORTER_PORT
+            value: "{{ .Values.settings.windowsExporterPort | default "9182" }}"
+          - name: WINDOWS_EXPORTER_ENABLED
+            value: "{{ .Values.settings.windowsExporterEnabled | default false }}"
+          {{- end }}
+          {{- if .Values.settings.dcgm.exporterEnabled | default true }}
+          - name: DCGM_EXPORTER_ENABLED
+            value: "{{ .Values.settings.dcgm.exporterEnabled | default true }}"
+          - name: DCGM_EXPORTER_NAMESPACE
+            value: "{{ .Values.settings.dcgm.exporterNamespace | default "" }}"
+          - name: DCGM_EXPORTER_LABEL_SELECTOR
+            value: "{{ .Values.settings.dcgm.exporterLabelSelector | default "" }}"
+          - name: DCGM_EXPORTER_PORT
+            value: "{{ .Values.settings.dcgm.exporterPort | default "9400" }}"
+          - name: DCGM_EXPORTER_TIMEOUT
+            value: "{{ .Values.settings.dcgm.exporterTimeout | default "30s" }}"
+          {{- end }}
+          - name: UNSCHEDULABLE_PODS_SCRAPE_FREQUENCY_TIME
+            value: "{{ .Values.settings.unschedulablePods.scrapingInterval }}"
+          - name: UNSCHEDULABLE_PODS_NUM_WORKERS
+            value: "{{ .Values.settings.unschedulablePods.numWorkers }}"
+          - name: KARPENTER_ENABLED
+            value: "{{ .Values.settings.karpenter.enabled }}"
+          - name: KARPENTER_SCRAPE_FREQUENCY_TIME
+            value: "{{ .Values.settings.karpenter.scrapingInterval }}"
+          - name: COROOT_NODE_AGENT_ENABLED
+            value: "{{ .Values.settings.corootNodeAgent.enabled | default false }}"
+          - name: COROOT_NODE_AGENT_LABEL_SELECTOR
+            value: "part-of={{ .Release.Name }}-psc-coroot-node-agent"
+          - name: COROOT_NODE_AGENT_PORT
+            value: "{{ .Values.settings.corootNodeAgent.port | default 80 }}"
+          - name: COROOT_NODE_AGENT_NUM_WORKERS
+            value: "{{ .Values.settings.corootNodeAgent.numWorkers | default "30" }}"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- if .Values.containerSecurityContext }}
+          securityContext:
+{{ toYaml .Values.containerSecurityContext | indent 12 }}
+{{- end }}
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+      - name: {{ .Values.imagePullSecrets.secretName }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

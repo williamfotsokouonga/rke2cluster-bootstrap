@@ -1,0 +1,111 @@
+{{- if .Values.serviceMonitor -}}
+{{- if .Values.serviceMonitor.enable -}}
+{{- if .Values.prometheusRule -}}
+{{- if .Values.prometheusRule.enable -}}
+{{- $fullName := include "helm.fullname" . -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fullName }}
+  labels:
+  {{ toYaml .Values.prometheusRule.labels | indent 4 }}
+  {{- with .Values.prometheusRule.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}  
+spec:
+  groups:
+    - name: {{ $fullName }}
+      rules:
+        {{- if .Values.prometheusRule.cpuUtilization.enable }}
+        - alert: PerfectScale exporter high CPU utilization
+          annotations:
+            description: "More than {{ .Values.prometheusRule.cpuUtilization.threshold }} CPU cores where utilized by PerfectScale's exporter in the last 5 minutes."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} high CPU utilization by exporter"
+          expr: |
+            avg_over_time(rate(container_cpu_usage_seconds_total{pod=~"{{ $fullName }}-.*", container="{{ .Chart.Name }}"}[1m])[5m:1s]) > {{ .Values.prometheusRule.cpuUtilization.threshold }}
+          for: 30m
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+        {{- end }}
+        - alert: PerfectScale exporter High KSM Scraping Error Rate
+          annotations:
+            description: "More than 30% of kube-state-metrics scraping attempts resulted in an error in the last 30 minutes."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} high kube-state-metrics scraping error rate"
+          expr: |
+            (sum(rate(psc_exporter_ksm_scraping_errors_total[30m])) / sum(rate(psc_exporter_ksm_scrapings_total[30m]))) > 0.3
+          for: 30m
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+        - alert: PerfectScale exporter High cAdvisor Scraping Error Rate
+          annotations:
+            description: "More than {{ mulf .Values.prometheusRule.cAdvisorScraping.threshold 100 }}% of cAdvisor scraping attempts resulted in an error in the last {{ .Values.prometheusRule.cAdvisorScraping.timeRange | trimSuffix "m" }} minutes."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} high cAdvisor scraping error rate"
+          expr: |
+            (sum(rate(psc_exporter_cadvisor_scraping_errors_total[{{ .Values.prometheusRule.cAdvisorScraping.timeRange }}])) / sum(rate(psc_exporter_cadvisor_scrapings_total[{{ .Values.prometheusRule.cAdvisorScraping.timeRange }}]))) > {{ .Values.prometheusRule.cAdvisorScraping.threshold }}
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+        - alert: PerfectScale exporter Time Windows Upload Error Rate
+          annotations:
+            description: "3 or more time windows upload errors to PerfectScale occurred in the last 1 hour."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} time windows upload error rate"
+          expr: |
+            increase(psc_exporter_time_windows_upload_errors_total[1h]) >= 3
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+        - alert: PerfectScale exporter Authorization Errors
+          annotations:
+            description: "2 or more PerfectScale's exporter authorization errors occurred in the last 1 hour."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} authorization errors"
+          expr: |
+            increase(psc_exporter_auth_errors_total[1h]) >= 2
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+        - alert: PerfectScale exporter Upload Policy Refresh Errors
+          annotations:
+            description: "2 or more errors occurred while refreshing upload policy in the last 1 hour."
+            runbook: "Please, contact PerfectScale support"
+            summary: "{{ $fullName }} upload policy refresh errors"
+          expr: |
+            increase(psc_exporter_upload_policy_errors_total[1h]) >= 2
+          labels:
+            {{- if .Values.prometheusRule.team }}
+            team: {{ .Values.prometheusRule.team }}
+            {{- end}}
+            {{- if .Values.prometheusRule.severity }}
+            severity: {{ .Values.prometheusRule.severity }}
+            {{- end}}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
